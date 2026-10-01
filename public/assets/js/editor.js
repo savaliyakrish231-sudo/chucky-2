@@ -56,7 +56,7 @@ ${live ? '<div id="statebar" class="statebar" role="status" hidden></div>' : ''}
   <div class="spacer"></div>
   <span id="flagpill" class="pill idle">${live ? 'Loading…' : 'No menu yet'}</span>
   <div class="actions">
-    ${B.personalise ? `<button class="btn" id="persona" ${act('Add an occasion + guest name to the cover')}>✨ Personalise</button>` : ''}
+    ${B.personalise ? `<button class="btn" id="persona" ${act('Personalise this menu for one table: a birthday, an anniversary…')}>✨ Personalise</button>` : ''}
     <button class="btn" id="fullprev" ${act('Open the current menu full-size in a new tab')}>Full Preview ↗</button>
     <button class="btn primary" id="export" ${act('Download the print-ready PDF')}>Export PDF</button>
     ${live ? '<span id="livechip" class="pill idle" role="button" tabindex="0" hidden>Loading…</span>' : ''}

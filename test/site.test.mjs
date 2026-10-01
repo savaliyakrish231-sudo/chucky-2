@@ -178,3 +178,17 @@ test('each editor page has a brand, and its API key is on the allowlist', () => 
   }
   assert.equal(new Set(Object.values(brands).map((b) => b.mem)).size, EDITOR_PAGES.length, 'mem keys are unique');
 });
+
+test('the lettering for a personalised Capiche menu is served, and can spell any name', async () => {
+  const res = await fetch(base + '/assets/fonts/permanent-marker.json');
+  assert.equal(res.status, 200);
+  const f = await res.json();
+  assert.ok(f.unitsPerEm > 0 && f.capHeight > 0, 'font metrics');
+  for (const ch of ' ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789&\'!.,-') {
+    const g = f.glyphs[ch];
+    assert.ok(g && g.w > 0 && (ch === ' ' || /\bm\b[\s\S]*\bh\b/.test(g.d)), 'glyph ' + JSON.stringify(ch));
+  }
+  assert.equal((await fetch(base + '/assets/fonts/LICENSE-PermanentMarker.txt')).status, 200, 'the licence ships with it');
+  const engine = fs.readFileSync('public/capiche/engine.js', 'utf8');
+  assert.match(engine, /\/assets\/fonts\/permanent-marker\.json/, 'the Capiche engine loads it');
+});

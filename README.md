@@ -163,6 +163,7 @@ the page's bytes, so the export is the real artwork with surgical changes. `publ
 | `start-state.json` | **The current menu**, stored as edits on top of `capiche.pdf` |
 | `engine.js` | The editing engine, ported verbatim from the original editor. Changes are marked `chucky-2`. |
 | `base_words.json`, `culinary.json` | Spell-check dictionaries |
+| `../assets/fonts/permanent-marker.json` | The lettering for a personalised menu (see below) |
 
 The current menu is the `Capiche_Menu (2).pdf` export from 29 Sep 2026. Relative to the base PDF, it
 renames HULK → HULK 2.O and CASSATA → CASSATA 2.O, rewrites three descriptions, adds HOT CHIPS,
@@ -194,6 +195,25 @@ leaves it less room. MARGHERITA has 20 characters a line with its usual 3 marker
 6. It can take a second line only if the column has space. A name that still doesn't fit is printed
 cut down to what does fit, which can look as if the edit did nothing. The card says exactly what
 prints and how to fix it, and Export is paused until the name fits.
+
+**A personalised menu** (the ✨ Personalise button, or click the motto in the preview). For one
+table: an occasion (Happy Birthday, Happy Anniversary, Congratulations, Welcome, or any message),
+the guest's name and an optional small line, hand-lettered in the box under the logo in place of
+the motto. The name prints in Capiche red. It lives on **that device only**: Export prints it (the
+file is named after the guest), it is never published, and it stays through a reload until it's
+cleared. A bar at the top says the menu is personalised, with Change and Clear. Clearing it gives
+back exactly the menu as before.
+
+- The menu's own fonts can't print a name: the hand-lettered one is embedded with only the motto's
+  letters (no C, G, J, K, Q, V, W, X), and each mono font is missing Q, X or Z. So the message is
+  drawn in **Permanent Marker** (Font Diner, Apache 2.0; `public/assets/fonts/`) as filled outlines.
+  No font is added to the PDF. `dev/font-outlines.mjs` makes the outline file from a .ttf
+  (`npm i --no-save opentype.js` first); it keeps capitals, accented capitals, digits and common
+  punctuation, so the message prints in capitals. A character the lettering has no shape for is
+  left out, and the dialog says which.
+- The old version printed two small mono lines in the gap above the motto, and published them with
+  the menu, so one table's name could reach every device. A published `persona` from that version
+  is now ignored.
 
 **Fixed from the original engine** (each marked `chucky-2` in `engine.js`):
 - Published add-on prices were dropped on every load (add-ons were set up after the state was applied).

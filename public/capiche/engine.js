@@ -12,25 +12,95 @@ const edits = {};
 let removed = new Set();
 let added = [];   // [{sec, name, desc, price, allergens:[], _id}]
 let markerEdits = {};   // dishId -> [marker types] override (dairy/gluten/jain/spicy/new)
-let persona = { occasion:'', guest:'' };   // personalised cover (occasion + guest name)
-// personalise-cover config for THIS menu. `del` = spans to hide when active (none for Capiche —
-// there's an empty gap under the logo). Coords are PDF points on the cover page.
-const COVER = { page:0, cx:113, adv:0.63, del:[],   // soft coral, centred on the Capiche logo/tagline block (x~113)
-  // Black, matching the motto block beneath it. Was a soft coral (0.95 0.62 0.57 rg) which printed
-  // noticeably paler than the wordmark and read as a different, washed-out element on the cover.
-  // `0 g` is the same ink this menu declares in add_const.ink_color, so it matches the motto exactly.
-  occ:{ y:472, size:13,   font:'/T1_2', color:'0 g' },                 // AOMonoBold
-  guest:{ y:454, size:11.5, font:'/T1_2', color:'0 g' } };
-function personaLine(spec, text){
-  const t=(text||'').toUpperCase(); if(!t) return '';
-  const w=t.length*COVER.adv*spec.size;
-  const x = spec.align==='right' ? (spec.right - w) : ((spec.cx!=null?spec.cx:COVER.cx) - w/2);
-  return '\nq BT '+spec.color+' '+spec.font+' 1 Tf '+spec.size+' 0 0 '+spec.size+' '+x.toFixed(2)+' '+spec.y+' Tm ('+escPdf(t)+')Tj ET Q';
+/* chucky-2: A PERSONALISED MENU — an occasion (HAPPY BIRTHDAY, HAPPY ANNIVERSARY, anything), the
+   guest's name and an optional short line, hand-lettered in the box under the logo. The motto that
+   lives there ("15" PIZZA … UNREASONABLE HOSPITALITY") steps aside while a menu is personalised and
+   comes back as soon as it's cleared. (The old version squeezed two small mono lines into the gap
+   above the motto.)
+   - The lettering. The menu's own hand-lettered font (DK Liquid Embrace) is embedded with only the
+     motto's letters (no C, G, J, K, Q, V, W, X), and its mono fonts each miss Q, X or Z, so none of
+     them can print any name or occasion. The message is drawn in Permanent Marker (Apache 2.0,
+     /assets/fonts/), as filled outlines: no font goes into the PDF, and once the message is cleared
+     the export is exactly what it was.
+   - It belongs to THIS device and is never published. A personal menu is for one table; publishing
+     it would put one guest's name on every device's menu. Export prints it. It's kept on the device
+     (localStorage) until cleared, so a reload doesn't lose it. A published state's `persona` (from
+     the old editor) is ignored. */
+let persona = { occasion:'', guest:'', note:'' };
+const PERSONA_KEY='chucky_persona_capiche';
+const COVER = {
+  page:0,
+  box:{ x0:24, x1:208, y0:298, y1:452 },   // the motto's box on the front page (PDF points, y up)
+  ink:'0.746 0.676 0.668 0.898 k',          // the motto's own rich black
+  red:'0 0.988 1 0 k',                      // the Capiche wordmark red, for the name
+};
+const personaOn=()=>!!(persona.occasion||persona.guest||persona.note);
+function personaLoad(){
+  try{ const s=JSON.parse(localStorage.getItem(PERSONA_KEY)||'null');
+    if(s&&typeof s==='object') persona={ occasion:String(s.occasion||''), guest:String(s.guest||''), note:String(s.note||'') }; }catch(_){}
 }
-// {del:[spans to remove], add:'stamp'} for a given page when personalise is active
+function personaSave(){ try{ if(personaOn()) localStorage.setItem(PERSONA_KEY, JSON.stringify(persona)); else localStorage.removeItem(PERSONA_KEY); }catch(_){} }
+// the motto: the front page's one text block in its hand-lettered font (/TT0)
+let _motto=null;
+function mottoSpan(){
+  if(_motto) return _motto;
+  const t=pageText(COVER.page), f=t.indexOf('/TT0 '); if(f<0) return null;
+  const s=t.lastIndexOf('BT', f), e=t.indexOf('ET', f);
+  return (s<0||e<0) ? null : (_motto=[s, e+2]);
+}
+let PFONT=null, _pfont=null;               // the lettering: per character, its advance and outline
+function loadPersonaFont(){
+  return _pfont || (_pfont = fetch('/assets/fonts/permanent-marker.json')
+    .then(r=>{ if(!r.ok) throw new Error('the lettering font answered '+r.status); return r.json(); })
+    .then(j=>(PFONT=j)).catch(e=>{ _pfont=null; throw e; }));
+}
+// what the lettering prints: capitals (accents kept), curly quotes made straight, spaces tidied
+const pfText=t=>String(t||'').toUpperCase().replace(/[‘’`´]/g,'\'').replace(/\s+/g,' ').trim();
+const pfClean=t=>[...pfText(t)].filter(ch=>PFONT.glyphs[ch]).join('').replace(/\s+/g,' ').trim();
+const pfDropped=t=>[...new Set([...pfText(t)].filter(ch=>!PFONT.glyphs[ch]))].join(' ');
+function pfWidth(t){ let w=0; for(let i=0;i<t.length;i++){ const g=PFONT.glyphs[t[i]]; if(!g) continue; w+=g.w+(i+1<t.length?(PFONT.kern[t[i]+t[i+1]]||0):0); } return w; }
+const pn=v=>{ const s=(+v).toFixed(3).replace(/\.?0+$/,''); return s==='-0'?'0':s; };
+// one line of lettering, centred on cx with its baseline at y, turned `deg` about its own middle
+function pfLine(t, size, cx, y, deg, ink){
+  const s=size/PFONT.unitsPerEm, w=pfWidth(t)*s, cap=PFONT.capHeight*s, r=deg*Math.PI/180, co=Math.cos(r), si=Math.sin(r);
+  const ex=cx-co*w/2+si*cap/2, ey=(y+cap/2)-si*w/2-co*cap/2;   // where the line's start lands once turned
+  let out='\nq '+ink+' '+pn(co*s)+' '+pn(si*s)+' '+pn(-si*s)+' '+pn(co*s)+' '+pn(ex)+' '+pn(ey)+' cm\n', x=0;
+  for(let i=0;i<t.length;i++){ const g=PFONT.glyphs[t[i]]; if(!g) continue;
+    if(g.d) out+='q 1 0 0 1 '+x+' 0 cm '+g.d+' f Q\n';
+    x+=g.w+(i+1<t.length?(PFONT.kern[t[i]+t[i+1]]||0):0); }
+  return out+'Q';
+}
+// the whole message, laid out in the motto's box: occasion (one line, or two if one would be too
+// small), the name in Capiche red, then the small line; centred, each line turned a touch like the
+// motto's hand lettering, and shrunk together if the stack is taller than the box
+function personaBlock(){
+  const B=COVER.box, W=B.x1-B.x0, H=B.y1-B.y0, cx=(B.x0+B.x1)/2, capK=PFONT.capHeight/PFONT.unitsPerEm;
+  const fitW=t=>W*0.94/(pfWidth(t)/PFONT.unitsPerEm);        // the size at which t spans the box
+  const occ=pfClean(persona.occasion), name=pfClean(persona.guest), note=pfClean(persona.note), rows=[];
+  if(occ){
+    if(fitW(occ)>=19 || !occ.includes(' ')) rows.push({t:occ, size:Math.min(28, fitW(occ))});
+    else {                                                     // break at the space nearest the middle
+      const at=[...occ].map((c,i)=>c===' '?i:-1).filter(i=>i>0).sort((a,b)=>Math.abs(a-occ.length/2)-Math.abs(b-occ.length/2))[0];
+      const a=occ.slice(0,at), b=occ.slice(at+1), z=Math.min(30, fitW(a), fitW(b));
+      rows.push({t:a, size:z}, {t:b, size:z});
+    }
+  }
+  if(name) rows.push({t:name, size:Math.min(40, fitW(name)), ink:COVER.red});
+  if(note) rows.push({t:note, size:Math.min(13, fitW(note))});
+  if(!rows.length) return '';
+  const gap=(a,b)=>0.45*Math.max(a.size,b.size)*capK;
+  const tall=k=>rows.reduce((h,r,i)=>h+r.size*k*capK+(i?gap(rows[i-1],r)*k:0),0);
+  const k=Math.min(1, H*0.9/tall(1)), tilt=[3,-2,2.5,-1.5];
+  let y=B.y1-(H-tall(k))/2, out='';                          // y: the top of the next line
+  rows.forEach((r,i)=>{ if(i) y-=gap(rows[i-1],r)*k; y-=r.size*k*capK;
+    out+=pfLine(r.t, r.size*k, cx, y, tilt[i%tilt.length], r.ink||COVER.ink); });
+  return out;
+}
+// {del:[spans to remove], add:'stamp'} for a page: on the front page, the motto out and the message in
 function personaCover(p){
-  if(p!==COVER.page || (!persona.occasion && !persona.guest)) return { del:[], add:'' };
-  return { del:(COVER.del||[]).slice(), add: personaLine(COVER.occ, persona.occasion)+personaLine(COVER.guest, persona.guest) };
+  if(p!==COVER.page || !personaOn() || !PFONT) return { del:[], add:'' };
+  const add=personaBlock(), m=mottoSpan();
+  return (add && m) ? { del:[m], add } : { del:[], add:'' };
 }
 // Korea is an AIKO marker and was never part of this menu: zero Capiche dishes carry it baked
 // (dairy 37, gluten 35, jain 20, spicy 5, new 8). The printed legend is Dairy / Gluten /
@@ -2813,6 +2883,10 @@ const QRK = (() => {
 QRK.init({ refresh: () => schedulePreview() });
 
 async function regenerate(){
+  // chucky-2: a personalised menu needs its lettering before the front page can be drawn. If it
+  // can't load, the motto stays and the bar says why (never a menu with half a message).
+  if(personaOn() && !PFONT){ try{ await loadPersonaFont(); }
+    catch(e){ try{ MenuState.notice('bad', 'Couldn’t load the lettering for the personalised message ('+esc(String(e.message||e))+'). The menu shows its usual motto for now.', [['Try again', ()=>schedulePreview()]]); }catch(_){} } }
   for(let p=0;p<pageStreams.length;p++){
     const ps=pageStreams[p];
     const st = structuralForPage(p, ps.pristine);
@@ -3028,6 +3102,17 @@ function pvSync(){
     d.style.height= (Math.max(8,b.top-b.bot)/H*100)+'%';
     d.title='Click to edit this item';
     d.addEventListener('click',()=>pvJump(b.id));
+    hl.appendChild(d);
+  }
+  // chucky-2: the motto's box opens Personalise (a birthday, an anniversary… for one table)
+  if(activePage===COVER.page){
+    const B=COVER.box, d=document.createElement('div');
+    d.className='hitbox persobox'+(personaOn()?' on':'');
+    d.style.left=(B.x0/W*100)+'%'; d.style.width=((B.x1-B.x0)/W*100)+'%';
+    d.style.top=((H-B.y1)/H*100)+'%'; d.style.height=((B.y1-B.y0)/H*100)+'%';
+    d.dataset.tag=personaOn()?'✨ Change the message':'✨ Personalise';
+    d.title=personaOn()?'Personalised on this device — click to change it':'Click to personalise this menu: a birthday, an anniversary…';
+    d.addEventListener('click', openPersona);
     hl.appendChild(d);
   }
   try{ if(typeof QRK!=='undefined') QRK.hits(hl, activePage, W, H); }catch(e){ console.error(e); }
@@ -3646,34 +3731,58 @@ async function openFullPreview(){
 document.getElementById('export').addEventListener('click', async ()=>{
   const bytes=await regenerate();
   const blob=new Blob([bytes],{type:'application/pdf'}); const url=URL.createObjectURL(blob);
-  const a=document.createElement('a'); a.href=url; a.download='Capiche_Menu.pdf'; a.click(); URL.revokeObjectURL(url);
+  const file=personaFile();   // chucky-2: a personalised menu is named after its guest
+  const a=document.createElement('a'); a.href=url; a.download=file; a.click(); URL.revokeObjectURL(url);
   try{MEM.snapshot('export');}catch(_){}
-  showChucky('Capiche_Menu.pdf');
+  showChucky(file);
 });
 // ---- Publish: chucky-2 — the shared MenuState (assets/js/menustate.js) owns the Publish button:
 // the version check, the conflict handling and the live status. Wired up at the end of boot().
-// ---------- PERSONALISE COVER: occasion + guest name stamped on the cover, then Export/Share ----------
-const OCCASIONS=[['','—'],['WELCOME','Welcome'],['HAPPY BIRTHDAY','Birthday'],['HAPPY ANNIVERSARY','Anniversary'],
-  ['CONGRATULATIONS','Congratulations'],["LET'S CELEBRATE","Let's Celebrate"],['__custom','Custom message…']];
+// ---------- PERSONALISE: chucky-2 — see "A PERSONALISED MENU" at the top of this file ----------
+const OCCASIONS=[['','—'],['HAPPY BIRTHDAY','Happy Birthday'],['HAPPY ANNIVERSARY','Happy Anniversary'],
+  ['CONGRATULATIONS','Congratulations'],['WELCOME','Welcome'],["LET'S CELEBRATE","Let's Celebrate"],['__custom','Custom message…']];
+function personaFile(){
+  const who=pfText(persona.guest||persona.occasion).replace(/[^A-Z0-9]+/g,'_').replace(/^_+|_+$/g,'').slice(0,30);
+  return 'Capiche_Menu'+(personaOn()&&who?'_'+who:'')+'.pdf';
+}
+// the header button shows when this device's menu is personalised; the bar says what that means
+function personaShow(announce){
+  const b=document.getElementById('persona'); if(b) b.classList.toggle('on', personaOn());
+  if(!announce || !personaOn()) return;
+  // at boot, a bar already up (the published menu couldn't load, say) matters more: leave it
+  const sb=document.getElementById('statebar'); if(announce==='boot' && sb && !sb.hidden) return;
+  const who=pfText(persona.guest)||pfText(persona.occasion);
+  try{ MenuState.notice('info', '✨ This menu is personalised'+(who?' for <b>'+esc(who)+'</b>':'')+', on <b>this device only</b>: it’s never published, and Export prints it. Clear it when the table is done.',
+    [['Change', openPersona], ['Clear', ()=>{ persona={occasion:'',guest:'',note:''}; personaSave(); personaShow(false); schedulePreview(); try{ MenuState.notice('ok','The menu is back to its usual motto.',[],4000); }catch(_){} }]]); }catch(_){}
+}
 function openPersona(){
   if(document.querySelector('.persov')) return;
+  loadPersonaFont().catch(()=>{});          // fetch the lettering while the form is filled in
   const preset=OCCASIONS.find(o=>o[0]===persona.occasion) ? persona.occasion : (persona.occasion?'__custom':'');
   const ov=document.createElement('div'); ov.className='persov';
-  ov.innerHTML='<div class="perscard"><div class="pershd">✨ Personalise the cover<span>occasion + guest name — printed on the menu cover</span></div>'
+  ov.innerHTML='<div class="perscard"><div class="pershd">✨ Personalise this menu<span>For one table — hand-lettered in the box under the logo, in place of the motto. Only on this device: Export prints it, and it’s never published.</span></div>'
     +'<label class="perslbl">Occasion</label><select class="perssel">'+OCCASIONS.map(o=>'<option value="'+o[0]+'"'+(o[0]===preset?' selected':'')+'>'+o[1]+'</option>').join('')+'</select>'
-    +'<input class="persocc" maxlength="28" placeholder="OCCASION (e.g. HAPPY BIRTHDAY)" '+(preset==='__custom'?'':'style="display:none"')+' value="'+esc(preset==='__custom'?persona.occasion:'')+'">'
-    +'<label class="perslbl">Guest / table name</label><input class="persguest" maxlength="24" placeholder="GUEST NAME" value="'+esc(persona.guest||'')+'">'
+    +'<input class="persocc" maxlength="30" placeholder="YOUR MESSAGE (e.g. HAPPY 50TH)" '+(preset==='__custom'?'':'style="display:none"')+' value="'+esc(preset==='__custom'?persona.occasion:'')+'">'
+    +'<label class="perslbl">Name</label><input class="persguest" maxlength="22" placeholder="e.g. RIYA" value="'+esc(persona.guest||'')+'">'
+    +'<label class="perslbl">Small line <i>(optional)</i></label><input class="persguest persnote" maxlength="34" placeholder="e.g. WITH LOVE FROM CAPICHE" value="'+esc(persona.note||'')+'">'
+    +'<div class="persdrop" aria-live="polite"></div>'
     +'<div class="persfoot"><button class="cropbtn ghost" data-a="clear" type="button">Clear</button><button class="cropbtn save" data-a="done" type="button">Done</button></div></div>';
   document.body.appendChild(ov);
-  const sel=ov.querySelector('.perssel'), occ=ov.querySelector('.persocc'), guest=ov.querySelector('.persguest');
-  const apply=()=>{ let o = sel.value==='__custom' ? occ.value : sel.value; persona.occasion=(o||'').toUpperCase(); persona.guest=(guest.value||''); schedulePreview(); try{MEM.tick();}catch(_){} document.getElementById('persona').classList.toggle('on', !!(persona.occasion||persona.guest)); };
+  const sel=ov.querySelector('.perssel'), occ=ov.querySelector('.persocc'), guest=ov.querySelector('.persguest:not(.persnote)'), note=ov.querySelector('.persnote'), drop=ov.querySelector('.persdrop');
+  const apply=()=>{
+    persona={ occasion:(sel.value==='__custom' ? occ.value : sel.value)||'', guest:guest.value||'', note:note.value||'' };
+    personaSave(); personaShow(false); schedulePreview();
+    // characters the lettering has no shape for are left out — say which, so nobody is surprised
+    const say=()=>{ const d=PFONT ? pfDropped(persona.occasion+persona.guest+persona.note) : ''; drop.textContent = d ? 'Can’t be hand-lettered, so left out: '+d : ''; };
+    PFONT ? say() : loadPersonaFont().then(say).catch(()=>{});
+  };
   sel.onchange=()=>{ occ.style.display = sel.value==='__custom'?'':'none'; if(sel.value==='__custom') occ.focus(); apply(); };
-  occ.oninput=apply; guest.oninput=apply;
-  ov.addEventListener('click',e=>{ if(e.target===ov){ ov.remove(); return; } const b=e.target.closest('[data-a]'); if(!b)return;
-    if(b.dataset.a==='clear'){ sel.value=''; occ.value=''; occ.style.display='none'; guest.value=''; apply(); }
-    else ov.remove();
+  occ.oninput=apply; guest.oninput=apply; note.oninput=apply;
+  ov.addEventListener('click',e=>{ if(e.target===ov){ ov.remove(); personaShow(true); return; } const b=e.target.closest('[data-a]'); if(!b)return;
+    if(b.dataset.a==='clear'){ sel.value=''; occ.value=''; occ.style.display='none'; guest.value=''; note.value=''; apply(); }
+    else { ov.remove(); personaShow(true); }
   });
-  document.getElementById('persona').classList.toggle('on', !!(persona.occasion||persona.guest));
+  setTimeout(()=>(preset ? guest : sel).focus(), 30);
 }
 document.getElementById('persona').addEventListener('click', openPersona);
 
@@ -3681,8 +3790,9 @@ document.getElementById('persona').addEventListener('click', openPersona);
 // ---- edit-memory glue (capiche) ----
 const MEM_BRAND='capiche';
 let memBaseVer='';
-function memSnapshot(){ return { qr:QRK.snap(), edits:{...edits}, removed:[...removed], added, markerEdits, persona:{...persona}, addons: addonsSnap() }; }
-function memApply(st){ QRK.load(st&&st.qr); for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); rewrapBaked(); /* chucky-2 */ removed=new Set(st.removed||[]); added=st.added||[]; markerEdits=st.markerEdits||{}; persona=Object.assign({occasion:'',guest:''}, st.persona||{});
+// chucky-2: no `persona` — a personalised menu stays on its device (see "A PERSONALISED MENU")
+function memSnapshot(){ return { qr:QRK.snap(), edits:{...edits}, removed:[...removed], added, markerEdits, addons: addonsSnap() }; }
+function memApply(st){ QRK.load(st&&st.qr); for(const k in edits) delete edits[k]; Object.assign(edits, st.edits||{}); rewrapBaked(); /* chucky-2 */ removed=new Set(st.removed||[]); added=st.added||[]; markerEdits=st.markerEdits||{};
   if(addons){
     if(st.addons && st.addons.rows){ addons.rows=st.addons.rows.map(r=>({key:r.key, name:r.name, price:r.price, removed:!!r.removed})); addons.title=st.addons.title||''; }
     else addonsInit();
@@ -3851,8 +3961,10 @@ async function boot(){
       keep: label=>MEM.snapshot(label),       // park the current edits in History before replacing them
       rebase: ()=>MEM.rebase(),
     });
+    personaLoad();                    // chucky-2: this device's personalised menu, if one is in progress
     await regenerate(); await renderPreview();
     document.getElementById('boot').style.display='none';
+    personaShow('boot');
   }catch(e){
     document.getElementById('bootmsg').innerHTML='Couldn’t load. If you opened this file directly, it needs to be <b>served</b> (deploy it, or run a local server). <br>'+esc(String(e));
     console.error(e);

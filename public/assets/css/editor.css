@@ -317,6 +317,14 @@ main.app{flex:1;min-height:0;display:grid;grid-template-columns:210px 1fr minmax
 .persocc,.persguest{text-transform:uppercase;font-weight:500;letter-spacing:.4px;margin-top:8px}
 .perssel:focus,.persocc:focus,.persguest:focus{border-color:var(--ac)}
 .persfoot{display:flex;justify-content:flex-end;gap:9px;margin-top:18px}
+.pershd span{line-height:1.5}
+.perslbl i{font-style:normal;letter-spacing:.04em;text-transform:none;opacity:.8}
+.persdrop{font-size:11.5px;color:var(--warn);margin-top:8px}
+.persdrop:empty{display:none}
+/* Capiche: the motto's box on the front page opens Personalise; a label says so on hover */
+.hitbox.persobox{border-radius:10px}
+.hitbox.persobox::after{content:attr(data-tag);position:absolute;left:50%;bottom:6px;transform:translateX(-50%);white-space:nowrap;font-size:11px;font-weight:500;color:var(--on-ac);background:var(--ac);border-radius:999px;padding:3px 9px;opacity:0;transition:opacity .15s;pointer-events:none}
+.hitbox.persobox:hover::after{opacity:1}
 .cropbtn{font-size:12.5px;color:var(--cream-dim);border:1px solid var(--line2);border-radius:8px;padding:9px 16px;transition:.13s}
 .cropbtn:hover{border-color:var(--ac);color:var(--cream)}
 .cropbtn.save{background:var(--ac);color:var(--on-ac);border-color:var(--ac);font-weight:500}
